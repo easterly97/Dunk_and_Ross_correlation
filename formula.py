@@ -3,29 +3,12 @@ import numpy as np
 from scipy import interpolate
 import math
 
-from gas_properties import *
+from liquid_properties import *
 from add_functions import *
 
-# Исходные данные ---------------------------------
-q_of_liquid = 0.022 # м3/с
-q_of_gas_surface = 200 # тыс.м3/сут
-dencity_of_liquid = 762.64 #кг/м3
-dencity_of_gas = 80 #кг/м3
 
-epsilon = 0.000018288
-inner_diameter = 0.152
-viscosity_of_liquid = 0.00097
-g = 9.8
-superficial_tencion_of_liquid = 0.00841
-# -------------------------------------------------
-
-# Площадь поперечного сечения
-Ap = 3.14 / 4 * inner_diameter ** 2
-
-
-
-
-def bezrazmernie_pokazateli(velocity_SL,velocity_SG,inner_diameter, viscosity_of_liquid , dencity_of_liquid, g, superficial_tencion_of_liquid):
+def bezrazmernie_pokazateli(velocity_SL, velocity_SG, inner_diameter, viscosity_of_liquid, dencity_of_liquid, g,
+							superficial_tencion_of_liquid):
 	# Безразмерные группы велиичин, предложенные Дансом и Россом
 	# Показатель скорости жидкости
 	Nlv = velocity_SL * (dencity_of_liquid / g / superficial_tencion_of_liquid) ** 0.25
@@ -34,12 +17,13 @@ def bezrazmernie_pokazateli(velocity_SL,velocity_SG,inner_diameter, viscosity_of
 	Ngv = velocity_SG * (dencity_of_liquid / g / superficial_tencion_of_liquid) ** 0.25
 
 	# Показатель диаметра трубы
-	Nd = inner_diameter * (dencity_of_liquid * g / superficial_tencion_of_liquid)**0.5
+	Nd = inner_diameter * (dencity_of_liquid * g / superficial_tencion_of_liquid) ** 0.5
 
 	# Показатель вязкости жидкости
 	Nl = viscosity_of_liquid * (g / dencity_of_liquid / (superficial_tencion_of_liquid) ** 3) ** 0.25
 
 	return Nlv, Ngv, Nd, Nl
+
 
 # ---------------------------------------------
 
@@ -186,34 +170,37 @@ def define_Vs(S, dencity_of_liquid, g, superficial_tencion_of_liquid):
 	""" Функция, возвращающая значение скорости проскальзывания """
 	if S == 0:
 		Vs = 0
-	elif S == -1:
-		Vs = 0  # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	else:
 		Vs = S / (dencity_of_liquid / g / superficial_tencion_of_liquid) ** 0.25
 
 	return Vs
 
 
-def Hl(velocity_S, velocity_SL, velocity_M, q_of_liquid):
+def define_Hl(velocity_S, velocity_SL, velocity_M, q_of_liquid, q_of_gas):
 	""" Функция, определяющая объемное содержание жидкости """
+	# Если режим - эмульсионный
 	if velocity_S == 0:
-		Hl = q_of_liquid
+		lambda_l = q_of_liquid / (q_of_liquid + q_of_gas)
+		Hl = lambda_l
+	# Если режим пузырьковый или снарядный
 	else:
-		Hl = (velocity_S - velocity_M + ((velocity_M - velocity_S) ** 2 + 4 * velocity_S * velocity_SL) ** 0.5) / (2 * velocity_S)
+		Hl = (velocity_S - velocity_M + ((velocity_M - velocity_S) ** 2 + 4 * velocity_S * velocity_SL) ** 0.5) / (
+				2 * velocity_S)
 
 	return Hl
 
 
-def calc_grad_grav(Hl, dencity_of_liquid, dencity_of_gas):
+def calc_grad_grav(dencity_of_mixture):
 	""" Функция, определяющая градиент давления, обусловленного гравитацией """
-	dencity_of_mixture = dencity_of_liquid * Hl + dencity_of_gas * (1 - Hl)
 	return dencity_of_mixture * 9.81
 
 
-def koef_of_friction(mode, velocity_SL, velocity_SG, inner_diameter, epsilon, Nd):
+def koef_of_friction(mode, velocity_SL, velocity_SG, inner_diameter, epsilon, Nd, dencity_of_liquid,
+					 viscosity_of_liquid):
 	""" Функция для определения коэффициента трения"""
 	data = pd.read_excel(r"data.xlsx", sheet_name='f2_friction')
 
+	# Если пузырьковый или снарядный режим
 	if mode == 1 or mode == 2:
 		x_array = np.array(data.Vertical_x)
 		x = x_array[~np.isnan(x_array)]
@@ -228,23 +215,24 @@ def koef_of_friction(mode, velocity_SL, velocity_SG, inner_diameter, epsilon, Nd
 		f2_horizontal = interpolate.interp1d(x, y, kind=2)
 
 		# Для диаграммы Муди
-		# N_Re_L = dencity_of_liquid * velocity_SL * inner_diameter / viscosity_of_liquid
 		# N_Re_G = dencity_of_gas * velocity_SG * inner_diameter / viscosity_of_gas
-
-		f1 = (1 / (1.74 - 2 * math.log10(2 * epsilon / inner_diameter))) ** 2
+		# f1 = (1 / (1.74 - 2 * math.log10(2 * epsilon / inner_diameter))) ** 2
+		# С использованием диаграммы Муди
+		N_Re_L = dencity_of_liquid * velocity_SL * inner_diameter / viscosity_of_liquid
+		f1 = data_of_moody(epsilon, inner_diameter, N_Re_L)
 
 		koef_for_f2 = f1 * velocity_SG * Nd ** (2 / 3) / (4 * velocity_SL)
-
 		f2 = f2_vertical(koef_for_f2)
 
 		f3 = 1 + f1 / 4 * (velocity_SG / 50 / velocity_SL) ** 0.5
 
 		f = f1 * f2 / f3
 
+	# Для эмульсионного режима
 	elif mode == 4:
-		# Для диаграммы Муди
-		# N_Re_G = dencity_of_gas * velocity_SG * inner_diameter / viscosity_of_gas
-		f = 0.01
+		N_Re_G = dencity_of_gas * velocity_SG * inner_diameter / viscosity_of_gas
+		f = data_of_moody(epsilon, inner_diameter, N_Re_G)
+
 	else:
 		f = 0.001
 
@@ -253,26 +241,59 @@ def koef_of_friction(mode, velocity_SL, velocity_SG, inner_diameter, epsilon, Nd
 
 def calc_grad_fric(mode, f, velocity_SL, velocity_SG, velocity_M):
 	""" Функция, вычисляющая градиент давления на трение """
+	# Для пузырькового и снарядного режима
 	if mode == 1 or mode == 2:
 		grad_fric = f * dencity_of_liquid * velocity_SL * velocity_M / (2 * inner_diameter)
+
+	# Для эмульсионного режима
 	elif mode == 4:
 		grad_fric = f * dencity_of_gas * velocity_SG ** 2 / (2 * inner_diameter)
+	# Для переходного режима
+	# fixme: добавить функционал для переходного режима
 	else:
 		grad_fric = 1
 
 	return grad_fric
 
 
-def calc_grad(grad_friction, grad_grav):
-	""" Функция, вычисляющая общий градиент давления, в атм/м """
-	grad_pressure = (grad_friction + grad_grav) / 101325
+def calc_grad_acceleration(mode, velocity_M, velocity_SG, dencity_N, pressure):
+	"""
+	Функция, вычисляющая градиент ускорения, в бар/м
+	:param mode: Тип режима
+	:param velocity_M: Скорость смеси, [м/с]
+	:param velocity_SG: Скорость газа, [м/с]
+	:param dencity_N: плотность смеси, [кг/м3]
+	:param pressure: Текущее давление, [Па]
+	:return: Значение градиента давления на ускорение, [Па]
+	"""
+	grad_acceleration = 0
+	if mode == 1 or mode == 2:
+		grad_acceleration = 0
+	elif mode == 4:
+		kinetic_enegry = velocity_M * velocity_SG * dencity_N / (pressure * 100000)
+		grad_acceleration = kinetic_enegry
 
-	return grad_pressure
+	return grad_acceleration
 
 
-def calc_pressure():
-	""" Функция, определяющая давление в трубе путем интегрирования градиента """
-	pass
+def calc_grad(mode, grad_friction, grad_grav, grad_acceleration):
+	"""
+	Функция, вычисляющая общий градиент давления, в бар/м
+	:param mode: Тип режима
+	:param grad_friction: Устьевое давление, [Па]
+	:param grad_grav: Градиент давления, [Па]
+	:param grad_acceleration: Градиент давления, [Па]
+	:return: Значение общего градиента давления, [бар]
+	"""
+	# Для эмульсионного режима
+	if mode == 4:
+		grad_pressure = (grad_grav + grad_friction) / (1 - grad_acceleration)
+	# Для пузырькового и пробкового режимов
+	else:
+		grad_pressure = (grad_friction + grad_grav + grad_acceleration)
+
+	return grad_pressure / 100000
+
 
 def toDefinePressureOnDepth(wellheadPressure, gradientOfPressure, depth):
 	"""
@@ -285,29 +306,47 @@ def toDefinePressureOnDepth(wellheadPressure, gradientOfPressure, depth):
 	return wellheadPressure + (gradientOfPressure / 100000) * depth
 
 
-def calc_pressure(q_of_liquid, top_hole_pressure = 'None'):
-	relative_density_gas = 0.4
+def calc_pressure(q_of_liquid_surface, bottom_hole_pressure, length_tube, step_of_calc, top_hole_pressure='None'):
+	"""
+	Функция, определяющая давление в трубе путем интегрирования градиента
+	"""
 
 	pressure_list, depth_list = [], []
 
-	# 100 интервалов по длине скважиине
-	for i in range(0,101):
+	# Цикл по интервалам
+	count_of_intervals = math.ceil(length_tube / step_of_calc)
+	for i in range(0, count_of_intervals + 1):
 
 		if i == 0:
 			if top_hole_pressure == 'None':
-				# Задаю на выбор вручную, бар
-				bottom_hole_pressure = 50
 				current_pressure = bottom_hole_pressure
 			else:
 				current_pressure = top_hole_pressure
-		current_temperature = 373
 
-		# Длина интервала = 20 м
-		current_depth = i * 20
 
-		currentKoefZ = toDefineKoefZ(current_pressure, relative_density_gas, current_temperature)
+		current_depth = i * step_of_calc
+
+		# Определение температуры на определенной глубине
+		if top_hole_pressure != 'None':
+			current_temperature = strata_temperature - (
+						strata_temperature - well_head_temperature) / length_tube * current_depth
+		else:
+			current_temperature = well_head_temperature + (
+						strata_temperature - well_head_temperature) / length_tube * current_depth
+
+		# Определение свойств нефти
+		# Растворимость газа по корреляции Стэндинга
+		Rs = 0.178 * relative_density_of_gas * ((current_pressure / 1.254 + 1.4) * 10 ** (
+					0.0125 * specific_gravity_oil - 0.001638 * current_temperature - 0.02912)) ** 1.2048
+		# Объемный коэффициент по корреляции Стэндинга (при давлениях ниже давления насыщения)
+		Boil = 0.9759 + 0.00012 * (5.618 * Rs * (
+					relative_density_of_gas / specific_gravity_oil) ** 0.5 + 2.25 * current_temperature + 40) ** 1.2
+
+		# Определение свойств газа
+		currentKoefZ = toDefineKoefZ(current_pressure, relative_density_of_gas, current_temperature)
 		Bg = 3.511 * 0.001 * currentKoefZ * current_temperature / current_pressure
 
+		q_of_liquid = q_of_liquid_surface / 86400 * Boil
 		q_of_gas = (q_of_gas_surface * 1000) / 86400 * Bg
 
 		# Приведенная скорость жидкости
@@ -319,53 +358,146 @@ def calc_pressure(q_of_liquid, top_hole_pressure = 'None'):
 		# Приведенная скорость смеси
 		velocity_M = velocity_SL + velocity_SG
 
-		Nlv, Ngv, Nd, Nl = bezrazmernie_pokazateli(velocity_SL,velocity_SG,inner_diameter, viscosity_of_liquid , dencity_of_liquid, g, superficial_tencion_of_liquid)
-
+		Nlv, Ngv, Nd, Nl = bezrazmernie_pokazateli(velocity_SL, velocity_SG, inner_diameter, viscosity_of_liquid,
+												   dencity_of_liquid, g, superficial_tencion_of_liquid)
 
 		Ngv_B_or_S, Ngv_S_or_Tr, Ngv_Tr_or_M = boundaries_of_modes(Nlv, Nd)
 		mode = define_fp(Ngv_B_or_S, Ngv_S_or_Tr, Ngv_Tr_or_M, Ngv)
-		S = define_S(mode, Nl, Nd, Nlv, Ngv)
-		Vs = define_Vs(S, dencity_of_liquid, g, superficial_tencion_of_liquid)
-		Hliquid = Hl(Vs, velocity_SL, velocity_M, q_of_liquid)
 
-		grad_grav = calc_grad_grav(Hliquid, dencity_of_liquid, dencity_of_gas)
+		# Переходный режим = особенный случай
+		if mode != 3:
+			S = define_S(mode, Nl, Nd, Nlv, Ngv)
+			Vs = define_Vs(S, dencity_of_liquid, g, superficial_tencion_of_liquid)
+			Hliquid = define_Hl(Vs, velocity_SL, velocity_M, q_of_liquid, q_of_gas)
+			dencity_of_mixture = dencity_of_liquid * Hliquid + dencity_of_gas * (1 - Hliquid)
 
-		f = koef_of_friction(mode, velocity_SL, velocity_SG, inner_diameter, epsilon, Nd)
-		grad_friction = calc_grad_fric(mode, f, velocity_SL, velocity_SG, velocity_M)
+			grad_grav = calc_grad_grav(dencity_of_mixture)
 
-		grad_pressure = calc_grad(grad_friction, grad_grav)
+			f = koef_of_friction(mode, velocity_SL, velocity_SG, inner_diameter, epsilon, Nd, dencity_of_liquid,
+								 viscosity_of_liquid)
+			grad_friction = calc_grad_fric(mode, f, velocity_SL, velocity_SG, velocity_M)
 
-		if top_hole_pressure == 'None':
-			current_pressure = bottom_hole_pressure - (grad_pressure / 100000) * current_depth
+			grad_acceleration = calc_grad_acceleration(mode, velocity_M, velocity_SG, dencity_of_mixture,
+													   current_pressure)
+
+			grad_pressure = calc_grad(mode, grad_friction, grad_grav, grad_acceleration)
+
 		else:
-			current_pressure = top_hole_pressure + (grad_pressure / 100000) * current_depth
+			# Пробковый режим
+			mode = 2
+			S = define_S(mode, Nl, Nd, Nlv, Ngv)
+			Vs = define_Vs(S, dencity_of_liquid, g, superficial_tencion_of_liquid)
+			Hliquid = define_Hl(Vs, velocity_SL, velocity_M, q_of_liquid, q_of_gas)
+			dencity_of_mixture = dencity_of_liquid * Hliquid + dencity_of_gas * (1 - Hliquid)
+			grad_grav = calc_grad_grav(dencity_of_mixture)
+			f = koef_of_friction(mode, velocity_SL, velocity_SG, inner_diameter, epsilon, Nd, dencity_of_liquid,
+								 viscosity_of_liquid)
+			grad_friction = calc_grad_fric(mode, f, velocity_SL, velocity_SG, velocity_M)
+			grad_acceleration = calc_grad_acceleration(mode, velocity_M, velocity_SG, dencity_of_mixture,
+													   current_pressure)
+
+			grad_pressure_mode2 = calc_grad(mode, grad_friction, grad_grav, grad_acceleration)
+
+			# Эмульсионный режим
+			mode = 4
+			S = define_S(mode, Nl, Nd, Nlv, Ngv)
+			Vs = define_Vs(S, dencity_of_liquid, g, superficial_tencion_of_liquid)
+			Hliquid = define_Hl(Vs, velocity_SL, velocity_M, q_of_liquid, q_of_gas)
+			dencity_of_gas_corr = dencity_of_gas * Ngv / Ngv_Tr_or_M
+			dencity_of_mixture = dencity_of_liquid * Hliquid + dencity_of_gas_corr * (1 - Hliquid)
+			grad_grav = calc_grad_grav(dencity_of_mixture)
+			f = koef_of_friction(mode, velocity_SL, velocity_SG, inner_diameter, epsilon, Nd, dencity_of_liquid,
+								 viscosity_of_liquid)
+			grad_friction = calc_grad_fric(mode, f, velocity_SL, velocity_SG, velocity_M)
+			grad_acceleration = calc_grad_acceleration(mode, velocity_M, velocity_SG, dencity_of_mixture,
+													   current_pressure)
+
+			grad_pressure_mode4 = calc_grad(mode, grad_friction, grad_grav, grad_acceleration)
+
+			# Расчет градиента давления для переходного режима
+			A = (Ngv_Tr_or_M - Ngv) / (Ngv_Tr_or_M - Ngv_S_or_Tr)
+			grad_pressure = A * grad_pressure_mode2 + (1 - A) * grad_pressure_mode4
+
+		# Определение давления на текущей глубине
+		if top_hole_pressure == 'None':
+			current_pressure = bottom_hole_pressure - grad_pressure * current_depth
+		else:
+			current_pressure = top_hole_pressure + grad_pressure * current_depth
 
 		depth_list.append(current_depth)
 		pressure_list.append(current_pressure)
 
-	# pressureList = np.array(pressureList)
-	# depthList_array = np.array(depthList)
-	# drawing(pressureList, depthList_array)
-
 	return current_pressure, depth_list, pressure_list
 
 
-# pressure_list = []
-# for i in [100,125,150,175,200]:
-# 	q_of_liquid = i / 86400
-# 	current_pressure = calc_pressure(q_of_liquid, top_hole_pressure=20)
-# 	pressure_list.append(current_pressure)
-#
-# drawing([100,125,150,175,200], pressure_list, type_graph= 'VLP')
+def to_draw_graph_VLP(production, bottom_hole_pressure, length_tube, step_of_calc, THP = 'None'):
+	pressure_list = []
+	for i in production:
+		q_of_liquid = i
+		current_pressure, depth_this_iter, pressure_this_iter = calc_pressure(q_of_liquid, bottom_hole_pressure, length_tube, step_of_calc, THP)
+		pressure_list.append(current_pressure)
 
-# Дебит жидкости 150 м3/сут
-q_of_liquid = 150 / 86400
-current_pressure, depth_this_iter, pressure_this_iter = calc_pressure(q_of_liquid, top_hole_pressure = 60)
-
-pressureList = np.array(pressure_this_iter)
-depthList_array = np.array(depth_this_iter)
-drawing(pressureList, depthList_array)
+	drawing(production, pressure_list, type_graph='VLP')
 
 
+def toDrawGraphPressure(q_of_liquid, bottom_hole_pressure, length_tube, step_of_calc, THP = 'None'):
+	current_pressure, depth_this_iter, pressure_this_iter = calc_pressure(q_of_liquid, bottom_hole_pressure, length_tube, step_of_calc, top_hole_pressure=THP)
+
+	pressureList = np.array(pressure_this_iter)
+	depthList_array = np.array(depth_this_iter)
+
+	drawing(pressureList, depthList_array)
 
 
+
+
+
+# Исходные данные ---------------------------------
+
+# Плотность жидкости в поверхностных условиях, кг/м3
+dencity_of_liquid = 762.64
+# Плотность воды в поверхностных условиях, кг/м3
+dencity_of_water = 1000
+# Плотность газа в поверхностных условиях, кг/м3
+dencity_of_gas = 20
+# Удельная плотность газа в поверхностных условиях
+relative_density_of_gas = 0.4
+
+# Вязкость жидкости, Па*с
+viscosity_of_liquid = 0.00097
+# Вязкость газа, Па*с
+viscosity_of_gas = 0.000016
+g = 9.8
+# Поверхностное натяжение жидкости
+superficial_tencion_of_liquid = 0.00841
+
+# Устьевая температура, град.К
+well_head_temperature = 15 + 273
+# Пластовая температура, град.К
+strata_temperature = 100 + 273
+
+# Длина НКТ, м
+length_tube = 2000
+# Диаметр НКТ, м
+inner_diameter = 0.152
+# Абсолютная шероховатость
+epsilon = 0.000018288
+
+# Площадь поперечного сечения, м2
+Ap = 3.14 / 4 * inner_diameter ** 2
+# Удельная плотность дегазрованной нефти
+relative_density_of_oil = dencity_of_liquid / dencity_of_water
+# Плотность нефти в API
+specific_gravity_oil = 141.5 / relative_density_of_oil - 131.5
+# -------------------------------------------------
+
+# # Дебит жидкости в поверхностных условиях, м3/сут
+# q_of_liquid_surface = 150
+# Дебит газа в поверхностных условиях, тыс.м3/сут
+q_of_gas_surface = 200
+# # Устьевое давление (при расчете забойного), бар
+# top_hole_pressure = 30
+# Забойное давление (при расчете устьевого), бар
+# bottom_hole_pressure = 100
+# Шаг расчета, м
+# step_of_calc = 20

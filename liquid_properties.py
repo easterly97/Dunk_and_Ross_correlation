@@ -55,8 +55,6 @@ def toDefineKoefZ(currentPressure, relDensityGas, currentTemp):
     # Коэф. сверхсжимаемости
     Z = A + (1 - A) / math.exp(B) + C * pressurePr ** D
 
-    # todo: В экселе-макросе еще задан случай, где Z определяется через 2 заданные точки. Выше описанный способ работает только для pressurePr < 11
-
     return Z
 
 
@@ -71,7 +69,4 @@ def toDefineCurrentDensityGas(relDensity, pressure, temperature, koefZ):
     :return: Абсолютная плотность газа, [кг/м3]
     """
     return 3.5 * 0.001 * relDensity * pressure / temperature / koefZ
-
-
-
 
